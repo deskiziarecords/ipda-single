@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IPDA Reversal Dashboard</title>
+  <!-- Tailwind CSS (browser‑only version) -->
+  <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+  <!-- Chart.js for the probability line chart -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Socket.IO client -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <!-- Helper to load Lucide static SVG icons -->
+  <script>
+    function lucideIcon(name, size = 24) {
+      const img = document.createElement('img');
+      img.src = `https://unpkg.com/lucide-static@latest/icons/${name}.svg`;
+      img.width = size;
+      img.height = size;
+      img.alt = name;
+      img.className = 'inline-block align-text-bottom';
+      return img;
+    }
+  </script>
+</head>
+<body class="bg-gray-50 font-inter antialiased">
+
+  <!-- Header -->
+  <header class="bg-white shadow-sm py-4">
+    <div class="max-w-5xl mx-auto flex items-center justify-between px-4">
+      <h1 class="text-2xl font-bold text-gray-800">IPDA Reversal Dashboard</h1>
+      <div id="pair" class="text-gray-600 font-medium"></div>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main class="max-w-5xl mx-auto my-6 px-4 grid gap-6 md:grid-cols-2">
+
+    <!-- Probability gauge -->
+    <section class="bg-white rounded-lg shadow p-6 flex flex-col items-center">
+      <h2 class="text-lg font-semibold text-gray-700 mb-2">Current Reversal Probability</h2>
+      <div id="prob-circle" class="relative w-48 h-48">
+        <!-- Circular progress (pure CSS) -->
+        <svg class="w-full h-full transform -rotate-90">
+          <circle cx="24" cy="24" r="22" stroke="#e5e7eb" stroke-width="4" fill="none"></circle>
+          <circle id="prob-ring"
+                  cx="24" cy="24" r="22"
+                  stroke="#ef4444"
+                  stroke-width="4"
+                  fill="none"
+                  stroke-dasharray="138.2"
+                  stroke-dashoffset="138.2"
+                  class="transition-all duration-500 ease-out"></circle>
+        </svg>
+        <div class="absolute inset-0 flex flex-col items-center justify-center">
+          <span id="prob-text" class="text-3xl font-bold text-gray-800">0 %</span>
+          <span id="signal-label" class="mt-2 text-sm font-medium text-gray-600"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Alerts list -->
+    <section class="bg-white rounded-lg shadow p-6 overflow-y-auto max-h-80">
+      <h2 class="text-lg font-semibold text-gray-700 mb-2 flex items-center">
+        <span id="alert-icon"></span>
+        <span class="ml-2">Recent Alerts</span>
+      </h2>
+      <ul id="alert-list" class="space-y-2"></ul>
+    </section>
+
+    <!-- Probability line chart -->
+    <section class="bg-white rounded-lg shadow p-6 col-span-2">
+      <h2 class="text-lg font-semibold text-gray-700 mb-2">Probability Over Time</h2>
+      <canvas id="prob-chart" class="w-full h-64"></canvas>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="text-center text-sm text-gray-500 py-4">
+    Powered by <a href="https://inceptionlabs.ai" class="text-blue-600 hover:underline">Inception</a>
+  </footer>
+
+  <!-- JavaScript – Socket.IO client & UI updates -->
+  <script>
+    // --------------------------------------------------------------
+    // UI element references
+    // --------------------------------------------------------------
+    const probRing   = document.getElementById('prob-ring');
+    const probText   = document.getElementById('prob-text');
+    const signalLabel= document.getElementById('signal-label');
+    const pairEl     = document.getElementById('pair');
+    const alertList  = document.getElementById('alert-list');
+    const alertIcon  = document.getElementById('alert-icon');
+
+    // --------------------------------------------------------------
+    // Chart.js initialisation
+    // --------------------------------------------------------------
+    const ctx = document.getElementById('prob-chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [], // timestamps
+        datasets: [{
+          label: 'Reversal Probability',
+          data: [],
+          borderColor: '#ef4444',
+          backgroundColor: 'rgba(239,68,68,0.1)',
+          tension: 0.3,
+          pointRadius: 2,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { type: 'time', time: { unit: 'minute' }, grid: { display: false } },
+          y: { min: 0, max: 1, ticks: { callback: v => (v*100).toFixed(0)+'%' } }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { mode: 'index', intersect: false }
+        }
+      }
+    });
+
+    // --------------------------------------------------------------
+    // Socket.IO connection
+    // --------------------------------------------------------------
+    const socket = io(window.location.origin); // auto‑detect host/port
+
+    socket.on('connect', () => {
+      console.log('✅ Connected to Flask‑SocketIO server');
+    });
+
+    socket.on('probability', (data) => {
+      // --------------------------------------------------------
+      // 1️⃣ Update gauge
+      // --------------------------------------------------------
+      const pct = Math.max(0, Math.min(1, data.probability));
+      const circumference = 2 * Math.PI * 22; // r = 22 (same as SVG)
+      probRing.style.strokeDashoffset = circumference * (1 - pct);
+      probText.textContent = (pct * 100).toFixed(1) + '%';
+      pairEl.textContent = data.pair;
+
+      // --------------------------------------------------------
+      // 2️⃣ Signal label & colour
+      // --------------------------------------------------------
+      if (pct >= data.threshold) {
+        signalLabel.textContent = ' High reversal probability';
+        signalLabel.className = 'text-red-600';
+        alertIcon.innerHTML = '';
+        alertIcon.appendChild(lucideIcon('alert-circle', 20));
+      } else {
+        signalLabel.textContent = ' Low probability';
+        signalLabel.className = 'text-green-600';
+        alertIcon.innerHTML = '';
+        alertIcon.appendChild(lucideIcon('check-circle', 20));
+      }
+
+      // --------------------------------------------------------
+      //  Alerts list (keep last 10)
+      // --------------------------------------------------------
+      const li = document.createElement('li');
+      li.className = 'flex items-center space-x-2 text-sm';
+      const icon = lucideIcon(pct >= data.threshold ? 'alert-triangle' : 'check', 16);
+      const timeStr = new Date(data.timestamp).toLocaleTimeString();
+      li.innerHTML = `<span class="font-medium">${timeStr}</span> <span>${pct >= data.threshold ? '🔴 HIGH' : '🟢 NORMAL'}</span>`;
+      li.prepend(icon);
+      alertList.prepend(li);
+      while (alertList.children.length > 10) alertList.removeChild(alertList.lastChild);
+
+      // --------------------------------------------------------
+      //  Update Chart.js
+      // --------------------------------------------------------
+      chart.data.labels.push(new Date(data.timestamp));
+      chart.data.datasets[0].data.push(pct);
+      // keep only the most recent 100 points
+      if (chart.data.labels.length > 100) {
+        chart.data.labels.shift();
+        chart.data.datasets[0].data.shift();
+      }
+      chart.update();
+    });
+
+    socket.on('disconnect', () => {
+      console.warn('🔌 Disconnected from server');
+    });
+  </script>
+</body>
+</html>

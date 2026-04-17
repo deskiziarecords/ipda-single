@@ -1,0 +1,7 @@
+como correr:
+
+pip install streamlit plotly jax jaxlib numpy
+
+
+
+streamlit run adelic_oracle_app.py
