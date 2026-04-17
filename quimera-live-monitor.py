@@ -10,6 +10,7 @@ import pandas as pd
 import joblib
 import xgboost as xgb
 from datetime import datetime
+from ipda_utils import engineer_ipda_features
 
 # Optional: Desktop notifications
 try:
@@ -73,58 +74,6 @@ def resample_data(df, interval):
     return df.resample(rule).agg({
         'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'
     }).dropna()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FEATURE ENGINEERING (MUST MATCH TRAINING EXACTLY)
-# ─────────────────────────────────────────────────────────────────────────────
-def engineer_ipda_features(df):
-    f = df.copy()
-    close, high, low, open_ = f['close'], f['high'], f['low'], f['open']
-    windows = [20, 40, 60]
-
-    tr = pd.concat([high-low, (high-close.shift(1)).abs(), (low-close.shift(1)).abs()], axis=1).max(axis=1)
-    f["atr_14"], f["atr_pct"] = tr.rolling(14).mean(), tr.rolling(14).mean()/close
-
-    for w in windows:
-        rh = high.rolling(w).max()
-        rl = low.rolling(w).min()
-        rr = (rh - rl).replace(0, np.nan)
-        f[f"ipda_{w}d_high"], f[f"ipda_{w}d_low"], f[f"ipda_{w}d_range"] = rh, rl, rr
-        f[f"ipda_{w}d_pos"] = (close - rl) / rr
-        f[f"dist_from_{w}d_high"], f[f"dist_from_{w}d_low"] = (rh - close)/f["atr_14"], (close - rl)/f["atr_14"]
-        f[f"breach_high_{w}d"], f[f"breach_low_{w}d"] = (high >= rh).astype(int), (low <= rl).astype(int)
-        f[f"above_equil_{w}d"] = (close > (rl + rr*0.5)).astype(int)
-
-    f["fvg_any"] = (((low > high.shift(2)) | (high < low.shift(2)))).astype(int)
-    f["mss_bearish"] = ((high.rolling(5).max().shift(1)==high.shift(1)) & (close < low.shift(1))).astype(int)
-    f["mss_bullish"] = ((low.rolling(5).min().shift(1)==low.shift(1)) & (close > high.shift(1))).astype(int)
-    
-    # RSI
-    d = close.diff()
-    g = d.clip(lower=0).rolling(14).mean()
-    l = (-d.clip(upper=0)).rolling(14).mean()
-    f["rsi_14"] = 100 - (100 / (1 + g/l.replace(0, np.nan)))
-    f["rsi_ob"], f["rsi_os"] = (f["rsi_14"]>=70).astype(int), (f["rsi_14"]<=30).astype(int)
-    
-    # Momentum & Candles
-    f["momentum_5"], f["momentum_10"], f["momentum_20"] = close.pct_change(5), close.pct_change(10), close.pct_change(20)
-    body = (close-open_).abs()
-    rng = (high-low).replace(0, np.nan)
-    f["body_ratio"] = body/rng
-    f["upper_wick_ratio"] = (high - pd.concat([close,open_],axis=1).max(axis=1))/rng
-    f["lower_wick_ratio"] = (pd.concat([close,open_],axis=1).min(axis=1) - low)/rng
-    f["bearish_candle"], f["bullish_candle"] = (close<open_).astype(int), (close>open_).astype(int)
-    
-    # Cycle
-    f["trading_day_num"] = np.arange(len(f))
-    f["quarter_cycle_pos"] = f["trading_day_num"] % 63
-    f["near_quarterly_shift"] = ((f["quarter_cycle_pos"]<=5)|(f["quarter_cycle_pos"]>=58)).astype(int)
-    f["is_monday"], f["is_friday"] = (f.index.dayofweek==0).astype(int), (f.index.dayofweek==4).astype(int)
-    
-    for w in windows:
-        f[f"confluence_{w}d"] = f[f"breach_high_{w}d"] + f[f"breach_low_{w}d"] + f["mss_bearish"] + f["mss_bullish"] + f["fvg_any"]
-
-    return f
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MONITORING LOOP
