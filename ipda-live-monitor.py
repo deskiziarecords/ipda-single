@@ -8,28 +8,51 @@ import xgboost as xgb
 import yfinance as yf
 import ccxt
 import MetaTrader5 as mt5
+import socketio
 from datetime import datetime, timezone, timedelta
-from app import push_update          # <-- import the socket helper
 from ipda_utils import engineer_ipda_features
 
 # ----------------------------------------------------------------------
-# CONFIG – keep the same keys you used before (pair, interval, etc.)
+# CONFIG – will be updated dynamically via SocketIO
 # ----------------------------------------------------------------------
 CONFIG = {
-    "data_source": "bitget",   # Options: "yahoo", "bitget", "metatrader"
-    "pair": "BTC/USDT",       # e.g., "EURUSD=X" (yahoo), "BTC/USDT" (bitget), "EURUSD" (metatrader)
+    "data_source": "bitget",
+    "pair": "BTC/USDT",
     "interval": "1d",
     "threshold": 0.35,
     "check_interval_sec": 60,
+    "model_path": "ipda_model.json"
 }
-PAIR_LABEL = CONFIG["pair"].replace("=X", "").replace("/", "")
 
 # ----------------------------------------------------------------------
-# Load the trained model & feature list (produced by ipda_reversal_predictor.py)
+# SocketIO Client Setup
 # ----------------------------------------------------------------------
-model = xgb.XGBClassifier()
-model.load_model("ipda_model.json")
-FEATURE_COLS = joblib.load("ipda_features.pkl")
+sio = socketio.Client()
+
+@sio.on('config_updated')
+def on_config_updated(data):
+    global CONFIG, model, FEATURE_COLS
+    print(f"⚙️ Config update received: {data}")
+
+    # Reload model if path changed
+    old_model_path = CONFIG.get("model_path")
+    CONFIG.update(data)
+
+    if CONFIG.get("model_path") != old_model_path:
+        load_model_and_features()
+
+def load_model_and_features():
+    global model, FEATURE_COLS
+    try:
+        model = xgb.XGBClassifier()
+        model.load_model(CONFIG["model_path"])
+        FEATURE_COLS = joblib.load("ipda_features.pkl")
+        print(f"✅ Model loaded from {CONFIG['model_path']}")
+    except Exception as e:
+        print(f"❌ Error loading model: {e}")
+
+# Initial load
+load_model_and_features()
 
 # ----------------------------------------------------------------------
 # Helper: fetch the most recent OHLCV bar (using yfinance for demo)
@@ -87,13 +110,23 @@ def fetch_latest():
 # Main monitoring loop
 # ----------------------------------------------------------------------
 def monitor():
-    print(f"🚀 Starting live monitor for {PAIR_LABEL} (threshold={CONFIG['threshold']})")
+    # Connect to the local Flask server
+    try:
+        sio.connect('http://localhost:5000')
+        print("🔌 Connected to dashboard server")
+    except Exception as e:
+        print(f"❌ Failed to connect to dashboard server: {e}")
+        # Continue anyway, will just print to console
+
+    print(f"🚀 Starting live monitor")
+
     while True:
+        pair_label = CONFIG["pair"].replace("=X", "").replace("/", "")
         try:
             # 1️⃣ Get recent data
             df = fetch_latest()
             if len(df) < 70:          # need enough rows for the longest rolling window
-                print("⏳ Not enough data yet – sleeping")
+                print(f"⏳ Not enough data yet for {pair_label} – sleeping")
                 time.sleep(CONFIG["check_interval_sec"])
                 continue
 
@@ -102,26 +135,47 @@ def monitor():
             latest = df_feat[FEATURE_COLS].iloc[[-1]].dropna()
 
             if latest.empty:
-                print("⚠️ Feature mismatch – skipping this cycle")
+                print(f"⚠️ Feature mismatch for {pair_label} – skipping this cycle")
                 time.sleep(CONFIG["check_interval_sec"])
                 continue
 
             # 3️⃣ Predict probability
             prob = model.predict_proba(latest.values)[0][1]
 
+            # Enrich payload with latest indicator values for the detailed dashboard
+            latest_row = df_feat.iloc[-1]
+
             # 4️⃣ Build payload for the dashboard
             payload = {
-                "pair": PAIR_LABEL,
-                "probability": float(prob),               # JSON‑serialisable
+                "pair": pair_label,
+                "probability": float(prob),
                 "threshold": CONFIG["threshold"],
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "price": float(latest_row['close']),
+                "rsi": float(latest_row['rsi_14']),
+                "atr_pct": float(latest_row['atr_pct']),
+                "mom5": float(latest_row['momentum_5']),
+                "h20": float(latest_row['ipda_20d_high']),
+                "l20": float(latest_row['ipda_20d_low']),
+                "pos20": float(latest_row['ipda_20d_pos']),
+                "bull_fvg": int(latest_row['bull_fvg']),
+                "bear_fvg": int(latest_row['bear_fvg']),
+                "mss_bullish": int(latest_row['mss_bullish']),
+                "mss_bearish": int(latest_row['mss_bearish']),
+                "near_bull_ob": int(latest_row['near_bull_ob']),
+                "swing_high": int(latest_row['swing_high']),
+                "swing_low": int(latest_row['swing_low']),
+                "conf20": int(latest_row['confluence_20d']),
+                "conf40": int(latest_row['confluence_40d']),
+                "conf60": int(latest_row['confluence_60d']),
             }
 
             # 5️⃣ Emit via SocketIO
-            push_update(payload)
-
-            # 6️⃣ (Optional) webhook or desktop notification – see previous answer
-            # send_alert(...)
+            if sio.connected:
+                sio.emit('monitor_data', payload)
+                print(f"📊 [{pair_label}] Prob: {prob*100:5.1f}% | Price: {payload['price']:.5f} (Sent)")
+            else:
+                print(f"📊 [{pair_label}] Prob: {prob*100:5.1f}% | Price: {payload['price']:.5f} (Offline)")
 
         except Exception as exc:
             print(f"❌ Monitor error: {exc}")

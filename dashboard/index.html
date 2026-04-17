@@ -729,13 +729,81 @@ try {
     document.getElementById('st-sock').style.color = 'var(--green)';
   });
   socket.on('disconnect', () => {
+    document.getElementById('conn-dot').className = 'conn-dot demo';
+    document.getElementById('conn-text').textContent = 'OFFLINE';
+    document.getElementById('conn-text').style.color = 'var(--fg3)';
     document.getElementById('st-sock').textContent = 'disconnected';
     document.getElementById('st-sock').style.color = 'var(--orange)';
   });
   socket.on('probability', payload => {
+    // If we receive live data, disable demo mode automatically if it was on
+    if (payload.is_live) {
+        setDemoMode(false);
+    }
     ingestPayload(payload);
   });
+
+  socket.on('config_updated', (cfg) => {
+    console.log('Backend config updated:', cfg);
+    updateUIFromConfig(cfg);
+  });
 } catch(e) {}
+
+function updateUIFromConfig(cfg) {
+  if (cfg.data_source) document.getElementById('cfg-src').value = cfg.data_source;
+  if (cfg.pair) {
+      document.getElementById('cfg-pair').value = cfg.pair;
+      document.getElementById('sb-pair').textContent = cfg.pair.replace("=X", "").replace("/", "");
+  }
+  if (cfg.interval) {
+      document.getElementById('cfg-interval').value = cfg.interval;
+      document.getElementById('sb-interval').textContent = cfg.interval;
+  }
+  if (cfg.check_interval_sec) document.getElementById('cfg-poll').value = cfg.check_interval_sec;
+  if (cfg.threshold) {
+      document.getElementById('cfg-thresh').value = cfg.threshold;
+      document.getElementById('sb-thresh').textContent = cfg.threshold.toFixed(2);
+  }
+  if (cfg.demo_mode !== undefined) {
+    document.getElementById('cfg-demo').value = cfg.demo_mode.toString();
+    setDemoMode(cfg.demo_mode);
+  }
+}
+
+function setDemoMode(val) {
+    document.getElementById('sb-demo').textContent = val ? 'TRUE' : 'FALSE';
+    document.getElementById('sb-demo').className = 'kv-val ' + (val ? 'orange' : 'green');
+}
+
+// Wire up the knobs
+const configInputs = [
+  { id: 'cfg-src', key: 'data_source' },
+  { id: 'cfg-pair', key: 'pair' },
+  { id: 'cfg-interval', key: 'interval' },
+  { id: 'cfg-poll', key: 'check_interval_sec', type: 'number' },
+  { id: 'cfg-thresh', key: 'threshold', type: 'number' },
+  { id: 'cfg-demo', key: 'demo_mode', type: 'bool' },
+  { id: 'cfg-model', key: 'model_path' }
+];
+
+configInputs.forEach(input => {
+  const el = document.getElementById(input.id);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    let val = el.value;
+    if (input.type === 'number') val = parseFloat(val);
+    if (input.type === 'bool') val = (val === 'true');
+
+    console.log(`Updating config: ${input.key} = ${val}`);
+    if (socket) {
+      socket.emit('update_config', { [input.key]: val });
+    }
+
+    if (input.key === 'demo_mode') {
+        setDemoMode(val);
+    }
+  });
+});
 
 // ─────────────────────────────────────────────────────────────
 // DEMO ENGINE — simulates quimera-live-monitor.py output
@@ -789,9 +857,14 @@ function simStep() {
   lastPollMs = performance.now() - t0;
   lastPollTime = t0;
 
+  const pair = document.getElementById('cfg-pair').value || 'EURUSD';
+  const thr = parseFloat(document.getElementById('cfg-thresh').value) || THRESHOLD;
+
   const payload = {
-    pair: 'EURUSD', probability: state.prob,
-    threshold: THRESHOLD, timestamp: ts,
+    pair: pair.replace("=X", "").replace("/", ""),
+    probability: state.prob,
+    threshold: thr,
+    timestamp: ts,
     price: state.price, rsi: state.rsi,
     atr_pct: state.atr_pct, mom5: state.mom5,
     body_ratio: state.body_ratio,
@@ -1049,8 +1122,19 @@ updateClock();
 // DEMO LOOP — 10s interval matching CONFIG.check_interval_sec
 // ─────────────────────────────────────────────────────────────
 
-simStep(); // immediate first tick
-setInterval(simStep, 10000);
+function runDemoLoop() {
+    const demoModeActive = document.getElementById('cfg-demo').value === 'true';
+    if (demoModeActive) {
+        simStep();
+    }
+
+    let pollInterval = parseInt(document.getElementById('cfg-poll').value) * 1000;
+    if (isNaN(pollInterval)) pollInterval = 10000;
+
+    setTimeout(runDemoLoop, pollInterval);
+}
+
+runDemoLoop();
 
 // Seed some history immediately for charts to look alive
 for (let i = 0; i < 30; i++) simStep();
