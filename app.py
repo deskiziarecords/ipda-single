@@ -11,6 +11,17 @@ eventlet.monkey_patch()   # required for Flask‑SocketIO to work with eventlet
 app = Flask(__name__, static_folder="dashboard", static_url_path="/dashboard")
 socketio = SocketIO(app, cors_allowed_origins="*")   # allow any origin for demo
 
+# Shared system configuration
+SYSTEM_CONFIG = {
+    "data_source": "bitget",
+    "pair": "BTC/USDT",
+    "interval": "1d",
+    "threshold": 0.35,
+    "check_interval_sec": 60,
+    "demo_mode": True,
+    "model_path": "ipda_model.json"
+}
+
 # ----------------------------------------------------------------------
 # Routes
 # ----------------------------------------------------------------------
@@ -26,23 +37,31 @@ def index():
 def on_connect():
     print("🔌 Client connected")
     emit("status", {"msg": "connected"})
+    # Send current config to newly connected client
+    emit("config_updated", SYSTEM_CONFIG)
 
 @socketio.on("disconnect")
 def on_disconnect():
     print("🔌 Client disconnected")
 
+@socketio.on("update_config")
+def on_update_config(data):
+    print(f"⚙️ Config update received: {data}")
+    SYSTEM_CONFIG.update(data)
+    # Broadcast update to everyone (dashboard and monitor)
+    socketio.emit("config_updated", SYSTEM_CONFIG)
+
+@socketio.on("monitor_data")
+def on_monitor_data(payload):
+    # This comes from the live monitor script
+    payload['is_live'] = True
+    socketio.emit("probability", payload)
+
 # ----------------------------------------------------------------------
 # Helper that the monitor script will import to push data
+# (Kept for backward compatibility if needed, but monitor should use SocketIO Client)
 # ----------------------------------------------------------------------
 def push_update(payload: dict):
-    """
-    Emit a `probability` event to **all** connected browsers.
-    payload must contain:
-        - pair (str)
-        - probability (float, 0‑1)
-        - threshold (float)
-        - timestamp (ISO‑8601 string)
-    """
     socketio.emit("probability", payload)
 
 # ----------------------------------------------------------------------
