@@ -10,6 +10,7 @@ import ccxt
 import MetaTrader5 as mt5
 from datetime import datetime, timezone, timedelta
 from app import push_update          # <-- import the socket helper
+from ipda_utils import engineer_ipda_features
 
 # ----------------------------------------------------------------------
 # CONFIG – keep the same keys you used before (pair, interval, etc.)
@@ -29,18 +30,6 @@ PAIR_LABEL = CONFIG["pair"].replace("=X", "").replace("/", "")
 model = xgb.XGBClassifier()
 model.load_model("ipda_model.json")
 FEATURE_COLS = joblib.load("ipda_features.pkl")
-
-# ----------------------------------------------------------------------
-# Feature engineering – copy‑paste the exact function from the predictor
-# ----------------------------------------------------------------------
-def engineer_ipda_features(df, windows=[20, 40, 60]):
-    # ... (the full function from the predictor script) ...
-    # For brevity we assume it is present verbatim.
-    # Ensure the function returns a DataFrame with the same column names.
-    # --------------------------------------------------------------
-    # (Insert the whole engineer_ipda_features implementation here)
-    # --------------------------------------------------------------
-    return df
 
 # ----------------------------------------------------------------------
 # Helper: fetch the most recent OHLCV bar (using yfinance for demo)
