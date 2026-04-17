@@ -2,7 +2,7 @@
 
 A high-performance algorithmic trading system based on the **ICT Interbank Price Delivery Algorithm (IPDA)** framework, featuring real-time reversal prediction, HFT simulations, and a live monitoring dashboard.
 
-## 🚀 System Overview
+## System Overview
 
 This repository integrates three core components:
 1.  **IPDA Reversal Suite**: An XGBoost-based prediction system that identifies high-probability price reversal windows using institutional order flow concepts (FVGs, MSS, IPDA Ranges).
@@ -11,7 +11,7 @@ This repository integrates three core components:
 
 ---
 
-## 🏗️ Architecture
+##  Architecture
 
 ### 1. IPDA Prediction & Monitoring
 *   **`ipda-predictor.py`**: Fetches historical data (Yahoo Finance, Bitget, MT5), engineers IPDA features, and trains the XGBoost classification model.
@@ -33,7 +33,7 @@ This repository integrates three core components:
 
 ---
 
-## 📦 Installation
+##  Installation
 
 Ensure you have Python 3.12+ installed.
 
@@ -45,7 +45,7 @@ pip install pandas numpy xgboost yfinance ccxt scikit-learn matplotlib seaborn j
 
 ---
 
-## 🛠️ Usage
+##  Usage
 
 ### 1. Training the Model
 First, generate the model and feature metadata:
@@ -72,7 +72,7 @@ streamlit run adelic_oracle_app.py
 
 ---
 
-## 🧠 Key Features
+## Key Features
 - **Institutional Indicators**: Automated detection of Fair Value Gaps (FVG), Market Structure Shifts (MSS), and Order Blocks (OB).
 - **Multi-Source Data**: Native support for Crypto (Bitget via CCXT), Forex (MetaTrader 5), and general equities (Yahoo Finance).
 - **JAX Acceleration**: Sub-millisecond execution simulations for HFT environments.
@@ -80,5 +80,5 @@ streamlit run adelic_oracle_app.py
 
 ---
 
-## ⚖️ Disclaimer
+##  Disclaimer
 This system is for educational and research purposes only. Algorithmic trading involves significant risk. Past performance is not indicative of future results.
