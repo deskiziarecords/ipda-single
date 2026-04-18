@@ -1,0 +1,16 @@
+pandas
+numpy
+xgboost
+yfinance
+ccxt
+scikit-learn
+matplotlib
+seaborn
+joblib
+plotly
+jax
+jaxlib
+streamlit
+flask
+flask-socketio
+eventlet
